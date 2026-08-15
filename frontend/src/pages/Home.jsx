@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import './Home.css'
 
 const highlights = [
 	{ value: '10x', label: 'faster issue triage' },
