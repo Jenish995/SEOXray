@@ -96,6 +96,7 @@ function createScanController(deps = {}) {
 					status: extraction.status
 				},
 				score: scoreResult.score,
+				confidence: scoreResult.confidence,
 				summary: scoreResult.summary,
 				coreSeo: analysis.summary?.coreSeo || {
 					passed: analysis.summary?.passed || 0,

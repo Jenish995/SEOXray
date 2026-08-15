@@ -69,16 +69,28 @@ describe("SEO scoring", () => {
     expect(result.score.value).toBe(100);
   });
 
-  it("returns fine-grained letter grade (e.g., A- for 90)", () => {
+  it("includes official score explanation and confidence metrics", () => {
+    const result = calculateSeoScore({
+      issues: [],
+      confidence: { score: 96, rating: "High", signals: [] }
+    });
+
+    expect(result.score.label).toBe("Technical SEO Audit Score");
+    expect(result.score.explanation).toContain("It does not represent your Google ranking");
+    expect(result.confidence.score).toBe(96);
+    expect(result.confidence.rating).toBe("High");
+  });
+
+  it("returns fine-grained letter grade (e.g., A- for 94)", () => {
     const perfect = calculateSeoScore({ issues: [] });
     expect(perfect.score.value).toBe(100);
     expect(perfect.score.grade).toBe("A+");
 
-    const singleWarning = calculateSeoScore({
-      issues: [{ category: "Metadata", severity: "warning" }]
+    const singleMedium = calculateSeoScore({
+      issues: [{ category: "Metadata", severity: "medium" }]
     });
-    // penalty = 30 * 0.35 = 10.5 => raw score = 89.5 => round = 90 => Grade = A-
-    expect(singleWarning.score.value).toBe(90);
-    expect(singleWarning.score.grade).toBe("A-");
+    // penalty = 30 * 0.20 = 6 => raw score = 94 => Grade = A
+    expect(singleMedium.score.value).toBe(94);
+    expect(singleMedium.score.grade).toBe("A");
   });
 });

@@ -2,8 +2,6 @@ import { Link } from 'react-router-dom'
 
 const navItems = [
 	{ label: 'Home', to: '/' },
-	{ label: 'How It Works', href: '#how-it-works' },
-	{ label: 'Features', href: '#features' },
 	{ label: 'Github', href: 'https://github.com/', external: true },
 	{ label: 'Scan', to: '/scan', cta: true },
 ]

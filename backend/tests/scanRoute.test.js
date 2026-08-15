@@ -45,6 +45,8 @@ describe("POST /api/scan", () => {
     expect(response.status).toBe(200);
     expect(response.body.success).toBe(true);
     expect(response.body.score).toBeDefined();
+    expect(response.body.confidence).toBeDefined();
+    expect(response.body.confidence.score).toBeGreaterThan(0);
     expect(response.body.coreSeo).toBeDefined();
     expect(response.body.socialSharing).toBeDefined();
     expect(response.body.structuredData).toBeDefined();

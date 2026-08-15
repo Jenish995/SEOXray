@@ -18,7 +18,7 @@ const Scan = () => {
     'Extracting SEO information',
     'Analyzing metadata and structure',
     'Checking images and links',
-    'Calculating SEOXray Health Score',
+    'Calculating Technical SEO Audit Score',
   ]
 
   const runScan = async (validatedUrl) => {
@@ -202,11 +202,22 @@ const Scan = () => {
                   <div className="scan-report">
                     <div className="scan-report__header">
                       <div className="scan-report__score-box">
-                        <div className="scan-report__score-title">SEO Health Score</div>
+                        <div className="scan-report__score-title">{scanResult.score?.label || 'Technical SEO Audit Score'}</div>
                         <div className="scan-report__score-row">
                           <span className="scan-report__score-value">{scanResult.score?.value ?? 0}<small>/100</small></span>
                           <span className="scan-report__score-grade">Grade: <strong>{scanResult.score?.grade || 'N/A'}</strong></span>
                         </div>
+                      </div>
+                      <div className="scan-report__confidence-box">
+                        <span className="scan-report__confidence-title">Audit Confidence</span>
+                        <span className={`confidence-badge confidence-badge--${(scanResult.confidence?.rating || 'High').toLowerCase()}`}>
+                          {scanResult.confidence?.score ?? 100}%
+                          <span className="confidence-badge__tier">
+                            {scanResult.confidence?.status === 'UNRELIABLE_AUDIT' ? 'Unreliable'
+                              : scanResult.confidence?.status === 'PARTIAL_AUDIT' ? 'Partial'
+                              : 'Full'} Audit
+                          </span>
+                        </span>
                       </div>
                       <div className="scan-report__page-meta">
                         <p className="scan-report__meta-line" title={scanResult.scan?.finalUrl || scanResult.scan?.url}>
@@ -217,6 +228,33 @@ const Scan = () => {
                         </p>
                       </div>
                     </div>
+
+                    <p className="scan-report__disclaimer">
+                      ℹ️ {scanResult.score?.explanation || "This is an audit score based on technical and on-page SEO checks performed by our tool. It does not represent your Google ranking, Search Console performance, or Google's assessment of your website."}
+                    </p>
+
+                    {scanResult.confidence?.status === 'UNRELIABLE_AUDIT' && (
+                      <div className="scan-report__notice scan-report__notice--unreliable">
+                        <span className="scan-report__notice-icon">🚫</span>
+                        <div>
+                          <strong>Unreliable Audit:</strong> The crawler encountered a bot challenge or security restriction. Page-level findings may be incomplete or inaccurate. Audit results cannot be fully trusted for this scan.
+                          {scanResult.confidence?.signals?.length > 0 && (
+                            <ul className="confidence-signals">
+                              {scanResult.confidence.signals.map((s, i) => <li key={i}>{s}</li>)}
+                            </ul>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {scanResult.confidence?.status === 'PARTIAL_AUDIT' && (
+                      <div className="scan-report__notice scan-report__notice--partial">
+                        <span className="scan-report__notice-icon">⚠️</span>
+                        <div>
+                          <strong>Partial Audit:</strong> Some crawl signals suggest the page may not have been fully accessible or requires JavaScript rendering. Results should be interpreted with caution.
+                        </div>
+                      </div>
+                    )}
 
                     {scanResult.jsRendering?.mayRequireJs || scanResult.jsRendering?.notice ? (
                       <div className="scan-report__notice scan-report__notice--js">
@@ -276,7 +314,7 @@ const Scan = () => {
                         {(scanResult.issues || []).map((issue) => (
                           <li key={issue.id} className={`scan-issues__item scan-issues__item--${issue.severity}`}>
                             <div className="scan-issues__item-top">
-                              <span className="scan-issues__severity">
+                              <span className={`scan-issues__severity scan-issues__severity--${issue.severity}`}>
                                 {issue.severity.toUpperCase()}
                               </span>
                               <span className="scan-issues__category">

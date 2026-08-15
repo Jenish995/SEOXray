@@ -12,9 +12,12 @@ const CATEGORY_WEIGHTS = {
 };
 
 const ISSUE_IMPACT = {
-  critical: 0.7,
-  warning: 0.35,
-  info: 0
+  critical: 0.70,
+  high: 0.40,
+  medium: 0.20,
+  warning: 0.20,
+  low: 0.05,
+  info: 0.00
 };
 
 function clamp(value, min, max) {
@@ -73,7 +76,13 @@ function calculateSeoScore(analysis) {
     score: {
       value,
       grade,
-      label: "SEOXray Health Score"
+      label: "Technical SEO Audit Score",
+      explanation: "This is an audit score based on technical and on-page SEO checks performed by our tool. It does not represent your Google ranking, Search Console performance, or Google's assessment of your website."
+    },
+    confidence: analysis?.confidence || {
+      score: 100,
+      rating: "High",
+      signals: []
     },
     summary: {
       passed: analysis?.summary?.passed || 0,

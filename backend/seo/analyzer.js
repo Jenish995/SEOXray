@@ -14,9 +14,75 @@ function isBlank(value) {
   return !String(value || "").trim();
 }
 
-function isLikelyBrokenLink(href) {
-  const url = String(href || "").toLowerCase();
-  return url.startsWith("javascript:") || url.startsWith("mailto:") || url === "#";
+function calculateAuditConfidence(data, issues, mayRequireJs) {
+  let score = 100;
+  const signals = [];
+
+  const botVerification = Boolean(data?.technical?.botVerificationDetected);
+  const status = data?.status;
+  const bodyTextLength = data?.technical?.bodyTextLength ?? 1000;
+  const failedRequests = data?.browser?.failedRequests || [];
+  const initialUrl = data?.url || "";
+  const finalUrl = data?.finalUrl || "";
+  const redirectCount = data?.technical?.redirectCount || 0;
+  const isNormalRedirect = Boolean(data?.technical?.isNormalRedirect);
+
+  if (botVerification) {
+    score -= 45;
+    signals.push("Bot verification or security challenge page detected");
+  } else {
+    if (bodyTextLength < 50 && mayRequireJs) {
+      score -= 20;
+      signals.push("Sparse static HTML content (<50 characters) requiring JavaScript rendering");
+    } else if (bodyTextLength < 50) {
+      score -= 25;
+      signals.push("Sparse HTML body text detected (<50 characters)");
+    }
+  }
+
+  if (typeof status === "number" && status >= 400) {
+    score -= 35;
+    signals.push(`HTTP response status code indicates an error (${status})`);
+  } else if (status == null) {
+    score -= 25;
+    signals.push("HTTP response status code was unconfirmed");
+  }
+
+  if (redirectCount > 2) {
+    score -= 20;
+    signals.push(`Target URL underwent a multi-step redirect chain (${redirectCount} hops)`);
+  } else if (redirectCount > 0 && !isNormalRedirect && initialUrl !== finalUrl) {
+    score -= 10;
+    signals.push("Target URL redirected during scan");
+  }
+
+  const criticalScriptFailures = failedRequests.filter(
+    r => r.category === "script" || r.category === "stylesheet"
+  ).length;
+
+  if (criticalScriptFailures >= 3) {
+    score -= 15;
+    signals.push(`${criticalScriptFailures} critical script/stylesheet network requests failed`);
+  }
+
+  const finalScore = Math.max(10, Math.min(100, score));
+  let statusTier = "FULL_AUDIT";
+  let rating = "High";
+
+  if (finalScore < 65) {
+    statusTier = "UNRELIABLE_AUDIT";
+    rating = "Low";
+  } else if (finalScore < 85) {
+    statusTier = "PARTIAL_AUDIT";
+    rating = "Medium";
+  }
+
+  return {
+    score: finalScore,
+    status: statusTier,
+    rating,
+    signals
+  };
 }
 
 function analyzeSeo(extracted) {
@@ -54,6 +120,21 @@ function analyzeSeo(extracted) {
     (isBlank(title) && h1.length === 0 && (hasJsAppContainer || isSocialApp))
   );
 
+  const isBotChallenge = Boolean(data?.technical?.botVerificationDetected);
+
+  if (isBotChallenge) {
+    issues.push(
+      createIssue(
+        "bot-verification-detected",
+        "Technical SEO",
+        "critical",
+        "Bot protection or CAPTCHA challenge encountered",
+        "The crawler received a security challenge or bot verification page instead of actual site content.",
+        "Ensure search crawler user agents are allowed or audit in an unblocked environment."
+      )
+    );
+  }
+
   if (mayRequireJs) {
     diagnostics.push(
       createIssue(
@@ -68,58 +149,62 @@ function analyzeSeo(extracted) {
   }
 
   if (isBlank(title)) {
-    issues.push(
-      createIssue(
-        "missing-title",
-        "Metadata",
-        "critical",
-        "Title tag is missing",
-        mayRequireJs
-          ? "The page title is empty or not present in initial HTML. Not detected because the page may require JavaScript rendering."
-          : "The page title is empty or not present.",
-        "Add a unique title tag that describes the page intent.",
-        { detectionState: mayRequireJs ? "requires_javascript" : "definitely_missing" }
-      )
-    );
+    if (!isBotChallenge) {
+      issues.push(
+        createIssue(
+          "missing-title",
+          "Metadata",
+          "high",
+          "Title tag is missing",
+          mayRequireJs
+            ? "The page title is empty or not present in initial HTML. Not detected because the page may require JavaScript rendering."
+            : "The page title is empty or not present.",
+          "Add a unique title tag that describes the page intent.",
+          { detectionState: mayRequireJs ? "requires_javascript" : "definitely_missing" }
+        )
+      );
+    }
   } else {
     if (title.trim().length > 60) {
       issues.push(
         createIssue(
           "title-too-long",
           "Metadata",
-          "warning",
-          "Title is very long",
-          "Very long titles may be truncated in search snippets.",
-          "Keep title length near 60 characters to improve snippet readability."
+          "medium",
+          "Title length exceeds snippet guidelines",
+          "Title is over 60 characters. Search engines may truncate or rewrite very long titles in search result snippets.",
+          "Treat 50–60 characters as a display guideline to prevent snippet truncation."
         )
       );
     }
   }
 
   if (isBlank(description)) {
-    issues.push(
-      createIssue(
-        "missing-meta-description",
-        "Metadata",
-        "warning",
-        "Meta description is missing",
-        mayRequireJs
-          ? "No meta description was found in initial HTML. Not detected because the page may require JavaScript rendering."
-          : "No meta description was found on this page.",
-        "Add a concise meta description around 50 to 160 characters.",
-        { detectionState: mayRequireJs ? "requires_javascript" : "definitely_missing" }
-      )
-    );
+    if (!isBotChallenge) {
+      issues.push(
+        createIssue(
+          "missing-meta-description",
+          "Metadata",
+          "medium",
+          "Meta description is missing",
+          mayRequireJs
+            ? "No meta description was found in initial HTML. Not detected because the page may require JavaScript rendering."
+            : "No meta description was found on this page.",
+          "Add a concise meta description summarizing page intent.",
+          { detectionState: mayRequireJs ? "requires_javascript" : "definitely_missing" }
+        )
+      );
+    }
   } else {
     if (description.trim().length < 50) {
       issues.push(
         createIssue(
           "meta-description-too-short",
           "Metadata",
-          "warning",
-          "Meta description is very short",
-          "Short descriptions may not communicate enough context in snippets.",
-          "Expand the meta description to provide clearer page intent."
+          "medium",
+          "Meta description is short",
+          "Description length is under 50 characters, which may not convey sufficient context in search snippets.",
+          "Treat 50–160 characters as a snippet display guideline."
         )
       );
     }
@@ -129,29 +214,31 @@ function analyzeSeo(extracted) {
         createIssue(
           "meta-description-too-long",
           "Metadata",
-          "warning",
-          "Meta description is very long",
-          "Long descriptions are often truncated in search snippets.",
-          "Shorten the description to around 160 characters."
+          "medium",
+          "Meta description is long",
+          "Description length exceeds 160 characters and may be truncated in search snippets.",
+          "Treat 50–160 characters as a snippet display guideline."
         )
       );
     }
   }
 
   if (h1.length === 0) {
-    issues.push(
-      createIssue(
-        "missing-h1",
-        "Content Structure",
-        "warning",
-        "No H1 heading found",
-        mayRequireJs
-          ? "This page does not contain an H1 heading in initial HTML. Not detected because the page may require JavaScript rendering."
-          : "This page does not contain an H1 heading.",
-        "Add one clear H1 heading describing the primary topic.",
-        { detectionState: mayRequireJs ? "requires_javascript" : "definitely_missing" }
-      )
-    );
+    if (!isBotChallenge) {
+      issues.push(
+        createIssue(
+          "missing-h1",
+          "Content Structure",
+          "medium",
+          "No H1 heading found",
+          mayRequireJs
+            ? "This page does not contain an H1 heading in initial HTML. Not detected because the page may require JavaScript rendering."
+            : "This page does not contain an H1 heading. An H1 tag helps users and search crawlers quickly understand the primary topic.",
+          "Add one clear H1 heading describing the primary topic for accessibility and document structure.",
+          { detectionState: mayRequireJs ? "requires_javascript" : "definitely_missing" }
+        )
+      );
+    }
   }
 
   if (h1.length > 1) {
@@ -159,10 +246,10 @@ function analyzeSeo(extracted) {
       createIssue(
         "multiple-h1",
         "Content Structure",
-        "warning",
+        "low",
         "Multiple H1 headings found",
-        "Multiple H1 tags can dilute the main topic signal.",
-        "Keep one primary H1 and move other headings to lower levels."
+        "Multiple H1 tags were found. Modern HTML permits multiple H1s, but using a single primary H1 remains a recommended structural best practice.",
+        "Consider consolidating to one main H1 heading per page for topic clarity."
       )
     );
   }
@@ -172,7 +259,7 @@ function analyzeSeo(extracted) {
       createIssue(
         "empty-headings",
         "Content Structure",
-        "warning",
+        "medium",
         "Empty heading text found",
         "One or more headings are present but have no meaningful text.",
         "Remove empty headings or add descriptive heading text."
@@ -185,42 +272,59 @@ function analyzeSeo(extracted) {
     image => image?.hasAltAttribute === true && typeof image.alt === "string" && image.alt.trim() === ""
   ).length;
 
-  if (missingAltCount > 0) {
+  if (missingAltCount > 0 && !isBotChallenge) {
     issues.push(
       createIssue(
         "images-missing-alt",
         "Images",
-        "warning",
+        "medium",
         "Images missing alt attributes",
         `${missingAltCount} image(s) do not define an alt attribute.`,
-        "Add alt attributes to meaningful images for accessibility and image SEO."
+        "Add descriptive alt attributes to meaningful images for accessibility and image SEO."
       )
     );
   }
 
-  if (emptyAltCount > 0) {
+  if (emptyAltCount > 0 && !isBotChallenge) {
     issues.push(
       createIssue(
         "images-empty-alt",
         "Images",
-        "warning",
+        "info",
         "Images with empty alt text",
-        `${emptyAltCount} image(s) have blank alt text.`,
-        "Use descriptive alt text for informative images; keep empty alt only for decorative ones."
+        `${emptyAltCount} image(s) have blank alt="" attributes. Empty alt is appropriate for decorative images.`,
+        "Keep empty alt text for purely decorative images; ensure informative images have descriptive alt text."
       )
     );
   }
 
   const allLinks = [...internalLinks, ...externalLinks];
   const emptyAnchorTextCount = allLinks.filter(link => isBlank(link.text)).length;
-  const likelyBrokenCount = allLinks.filter(link => isLikelyBrokenLink(link.href)).length;
 
-  if (allLinks.length === 0) {
+  const scriptOrPlaceholderLinks = allLinks.filter(link => {
+    const href = String(link.href || "").trim().toLowerCase();
+    return href === "#" || href.startsWith("javascript:");
+  }).length;
+
+  const likelyBrokenCount = allLinks.filter(link => {
+    const href = String(link.href || "").trim().toLowerCase();
+    if (href === "#" || href.startsWith("javascript:") || href.startsWith("mailto:") || href.startsWith("tel:")) {
+      return false;
+    }
+    try {
+      new URL(href, finalUrl || "https://example.com");
+      return false;
+    } catch (err) {
+      return true;
+    }
+  }).length;
+
+  if (allLinks.length === 0 && !isBotChallenge) {
     issues.push(
       createIssue(
         "no-links",
         "Links",
-        "warning",
+        "medium",
         "No links found",
         "No internal or external links were detected on this page.",
         "Add meaningful internal linking to help crawlability and context."
@@ -228,12 +332,12 @@ function analyzeSeo(extracted) {
     );
   }
 
-  if (emptyAnchorTextCount > 0) {
+  if (emptyAnchorTextCount > 0 && !isBotChallenge) {
     issues.push(
       createIssue(
         "empty-anchor-text",
         "Links",
-        "warning",
+        "medium",
         "Links with empty anchor text",
         `${emptyAnchorTextCount} link(s) have no anchor text.`,
         "Use descriptive anchor text to improve accessibility and relevance signals."
@@ -241,30 +345,45 @@ function analyzeSeo(extracted) {
     );
   }
 
-  if (likelyBrokenCount > 0) {
+  if (scriptOrPlaceholderLinks > 0 && !isBotChallenge) {
+    issues.push(
+      createIssue(
+        "interactive-placeholder-links",
+        "Links",
+        "low",
+        "Interactive or placeholder links found",
+        `${scriptOrPlaceholderLinks} link(s) use '#' or 'javascript:' href values.`,
+        "Ensure primary site navigation uses standard crawlable URLs rather than JavaScript event handlers."
+      )
+    );
+  }
+
+  if (likelyBrokenCount > 0 && !isBotChallenge) {
     issues.push(
       createIssue(
         "possible-broken-links",
         "Links",
-        "warning",
-        "Links may be non-crawlable",
-        `${likelyBrokenCount} link(s) use placeholder or non-crawlable href values.`,
-        "Replace placeholder links with valid, crawlable URLs where appropriate."
+        "medium",
+        "Links may be non-crawlable or malformed",
+        `${likelyBrokenCount} link(s) have unparseable or malformed URL structures.`,
+        "Replace invalid link URLs with valid, crawlable absolute or relative paths."
       )
     );
   }
 
   if (isBlank(canonical)) {
-    issues.push(
-      createIssue(
-        "missing-canonical",
-        "Technical SEO",
-        "warning",
-        "Canonical URL is missing",
-        "No canonical link tag was found.",
-        "Add a canonical URL to prevent duplicate content ambiguity."
-      )
-    );
+    if (!isBotChallenge) {
+      issues.push(
+        createIssue(
+          "missing-canonical",
+          "Technical SEO",
+          "medium",
+          "Canonical URL is missing",
+          "No canonical link tag was found on this page.",
+          "Add a self-referential canonical URL tag to clarify preferred indexing URL."
+        )
+      );
+    }
   } else {
     try {
       new URL(canonical, finalUrl || data?.url || "https://example.com");
@@ -273,7 +392,7 @@ function analyzeSeo(extracted) {
         createIssue(
           "invalid-canonical",
           "Technical SEO",
-          "critical",
+          "high",
           "Canonical URL is invalid",
           "The canonical tag value is not a valid URL.",
           "Set canonical to a valid absolute or site-relative URL."
@@ -282,17 +401,51 @@ function analyzeSeo(extracted) {
     }
   }
 
+  let pathname = "";
+  try {
+    pathname = new URL(finalUrl || data?.url || "https://example.com").pathname.toLowerCase();
+  } catch (err) {
+    pathname = "";
+  }
+
+  const isUtilityPage = Boolean(
+    pathname.includes("/login") ||
+    pathname.includes("/admin") ||
+    pathname.includes("/cart") ||
+    pathname.includes("/checkout") ||
+    pathname.includes("/account") ||
+    pathname.includes("/auth") ||
+    pathname.includes("/search") ||
+    pathname.includes("/signin") ||
+    pathname.includes("/signup")
+  );
+
+  const isHomepage = pathname === "/" || pathname === "";
+
   if (robotsMeta.includes("noindex")) {
-    issues.push(
-      createIssue(
-        "robots-noindex",
-        "Technical SEO",
-        "critical",
-        "Robots meta contains noindex",
-        "Search engines are instructed not to index this page.",
-        "Remove noindex if this page should appear in search results."
-      )
-    );
+    if (isUtilityPage) {
+      issues.push(
+        createIssue(
+          "robots-noindex-utility",
+          "Technical SEO",
+          "info",
+          "Robots meta contains noindex on utility/private page",
+          "This page contains noindex, which is standard practice for private or utility pages (such as login or checkout).",
+          "No action required if this page is intended to be kept out of search results."
+        )
+      );
+    } else {
+      issues.push(
+        createIssue(
+          "robots-noindex",
+          "Technical SEO",
+          isHomepage ? "critical" : "high",
+          "Robots meta contains noindex",
+          "Search engines are instructed not to index this page.",
+          "Remove noindex if this page should appear in search results."
+        )
+      );
+    }
   }
 
   if (robotsMeta.includes("nofollow")) {
@@ -300,7 +453,7 @@ function analyzeSeo(extracted) {
       createIssue(
         "robots-nofollow",
         "Technical SEO",
-        "warning",
+        "medium",
         "Robots meta contains nofollow",
         "Search engines are instructed not to follow links on this page.",
         "Remove nofollow if link equity and crawl flow are intended."
@@ -320,7 +473,7 @@ function analyzeSeo(extracted) {
       createIssue(
         "missing-open-graph-tags",
         "Social Sharing",
-        "warning",
+        "low",
         "Open Graph metadata is incomplete",
         "Open Graph metadata is incomplete. Some Open Graph tags are missing and may affect how the page appears when shared on social platforms.",
         `Add missing Open Graph tags (${missingOpenGraphTags.join(", ")}) to improve social link previews.`
@@ -339,7 +492,7 @@ function analyzeSeo(extracted) {
       createIssue(
         "missing-twitter-tags",
         "Social Sharing",
-        "warning",
+        "low",
         "Twitter Card metadata is incomplete",
         "Twitter Card metadata is incomplete. Some Twitter/X Card tags are missing. Adding the recommended tags can improve how this page appears when shared on X/Twitter.",
         `Add missing Twitter Card tags (${missingTwitterTags.join(", ")}) to improve how this page appears when shared on X/Twitter.`
@@ -365,7 +518,7 @@ function analyzeSeo(extracted) {
       createIssue(
         "non-https-url",
         "Technical SEO",
-        "warning",
+        "high",
         "Page is not using HTTPS",
         "The scanned page does not resolve to HTTPS.",
         "Serve this page over HTTPS to improve trust and ranking signals."
@@ -386,12 +539,12 @@ function analyzeSeo(extracted) {
     );
   }
 
-  if (isBlank(viewport)) {
+  if (isBlank(viewport) && !isBotChallenge) {
     issues.push(
       createIssue(
         "missing-viewport",
         "Technical SEO",
-        "warning",
+        "medium",
         "Viewport meta tag is missing",
         "No viewport tag was detected for responsive behavior.",
         "Add a viewport meta tag for mobile rendering support."
@@ -428,6 +581,8 @@ function analyzeSeo(extracted) {
     );
   }
 
+  const confidence = calculateAuditConfidence(data, issues, mayRequireJs);
+
   const coreIssues = issues.filter(
     issue =>
       issue.category !== "Social Sharing" &&
@@ -437,8 +592,9 @@ function analyzeSeo(extracted) {
   );
 
   const critical = coreIssues.filter(issue => issue.severity === "critical").length;
-  const warnings = coreIssues.filter(issue => issue.severity === "warning").length;
-  const passed = Math.max(0, 24 - (critical + warnings));
+  const high = coreIssues.filter(issue => issue.severity === "high").length;
+  const warnings = coreIssues.filter(issue => issue.severity === "medium" || issue.severity === "warning").length;
+  const passed = Math.max(0, 24 - (critical + high + warnings));
 
   const openGraphWarning = issues.some(issue => issue.id === "missing-open-graph-tags");
   const twitterCardWarning = issues.some(issue => issue.id === "missing-twitter-tags");
@@ -447,13 +603,14 @@ function analyzeSeo(extracted) {
     issues,
     diagnostics,
     mayRequireJs,
+    confidence,
     summary: {
       passed,
-      warnings,
+      warnings: warnings + high,
       critical,
       coreSeo: {
         passed,
-        warnings,
+        warnings: warnings + high,
         critical
       },
       socialSharing: {

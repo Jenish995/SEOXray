@@ -226,10 +226,27 @@ async function extractPageData(url, options = {}) {
 			}
 
 			const failure = request.failure();
+			const requestUrl = request.url().toLowerCase();
+			const type = request.resourceType();
+			let category = "other";
+
+			if (type === "script") {
+				category = requestUrl.includes("analytics") || requestUrl.includes("gtm") || requestUrl.includes("pixel") || requestUrl.includes("telemetry")
+					? "analytics"
+					: "script";
+			} else if (type === "stylesheet") {
+				category = "stylesheet";
+			} else if (type === "image") {
+				category = "image";
+			} else if (requestUrl.includes("analytics") || requestUrl.includes("tracking") || requestUrl.includes("collector")) {
+				category = "analytics";
+			}
+
 			failedRequests.push({
 				url: request.url(),
 				method: request.method(),
-				resourceType: request.resourceType(),
+				resourceType: type,
+				category,
 				errorText: failure ? failure.errorText : "Request failed"
 			});
 		});
@@ -243,6 +260,25 @@ async function extractPageData(url, options = {}) {
 
 		result.finalUrl = page.url();
 		result.status = response ? response.status() : null;
+
+		const redirectChain = response ? response.request().redirectChain() : [];
+		const redirectCount = redirectChain.length;
+		let isNormalRedirect = false;
+
+		if (redirectCount === 1) {
+			try {
+				const initialObj = new URL(url);
+				const finalObj = new URL(result.finalUrl);
+				const initialCleanHost = initialObj.hostname.replace(/^www\./, "");
+				const finalCleanHost = finalObj.hostname.replace(/^www\./, "");
+
+				if (initialCleanHost === finalCleanHost) {
+					isNormalRedirect = true;
+				}
+			} catch (err) {
+				isNormalRedirect = false;
+			}
+		}
 
 		const extracted = await page.evaluate(() => {
 			const getMetaByName = name =>
@@ -321,6 +357,21 @@ async function extractPageData(url, options = {}) {
 				document.querySelector('link[rel="canonical"]')?.getAttribute("href")?.trim() || "";
 
 			const bodyText = document.body ? (document.body.innerText || "").trim() : "";
+			const lowerHtml = (document.documentElement ? document.documentElement.outerHTML : "").toLowerCase();
+			const lowerTitle = (document.title || "").toLowerCase();
+
+			const botVerificationDetected = Boolean(
+				lowerTitle.includes("just a moment") ||
+				lowerTitle.includes("attention required") ||
+				lowerTitle.includes("captcha") ||
+				lowerTitle.includes("access denied") ||
+				lowerHtml.includes("cf-browser-verification") ||
+				lowerHtml.includes("ray id:") ||
+				lowerHtml.includes("enable javascript and cookies") ||
+				lowerHtml.includes("verify you are human") ||
+				lowerHtml.includes("ddos-guard")
+			);
+
 			const hasJsAppContainer = Boolean(
 				document.querySelector('#root, #app, #__next, #__nuxt, app-root, [data-reactroot], script[id="__NEXT_DATA__"]')
 			);
@@ -380,7 +431,9 @@ async function extractPageData(url, options = {}) {
 					robotsMeta,
 					bodyTextLength: bodyText.length,
 					hasJsAppContainer,
-					isSocialApp
+					isSocialApp,
+					botVerificationDetected,
+					elementCount: document.querySelectorAll("*").length
 				},
 				structuredData,
 				performance: navigationPerformance
@@ -393,7 +446,11 @@ async function extractPageData(url, options = {}) {
 		result.canonical = extracted.canonical;
 		result.openGraph = extracted.openGraph;
 		result.twitterCard = extracted.twitterCard;
-		result.technical = extracted.technical;
+		result.technical = {
+			...extracted.technical,
+			redirectCount,
+			isNormalRedirect
+		};
 		result.structuredData = extracted.structuredData;
 		result.performance = extracted.performance;
 
