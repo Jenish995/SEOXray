@@ -5,56 +5,85 @@ import './Scan.css'
 const Scan = () => {
   const [urls, setUrls] = useState('')
   const [error, setError] = useState('')
-  const [isSubmitted, setIsSubmitted] = useState(false)
   const [isValidating, setIsValidating] = useState(false)
+  const [isScanning, setIsScanning] = useState(false)
   const [isUrlValid, setIsUrlValid] = useState(false)
+  const [scanResult, setScanResult] = useState(null)
 
-  const isLoading = isValidating && urls.trim() !== ''
+  const isLoading = isValidating || isScanning
 
-  const steps = [
-    { label: 'Connecting to website', done: true },
-    { label: 'Loading page', done: true },
-    { label: 'Analyzing metadata', done: true },
-    { label: 'Checking headings', done: true },
-    { label: 'Checking images', done: false, active: true },
-    { label: 'Checking links', done: false },
-    { label: 'Calculating SEO score', done: false },
+  const scanChecks = [
+    'Connecting to website',
+    'Loading page',
+    'Extracting SEO information',
+    'Analyzing metadata and structure',
+    'Checking images and links',
+    'Calculating SEOXray Health Score',
   ]
+
+  const runScan = async (validatedUrl) => {
+    setIsScanning(true)
+    setScanResult(null)
+
+    try {
+      const response = await fetch('http://localhost:5000/api/scan', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ url: validatedUrl }),
+      })
+
+      const payload = await response.json().catch(() => ({}))
+
+      if (!response.ok) {
+        setError(payload?.error || 'Scan failed. Please try again.')
+        setIsUrlValid(false)
+        return
+      }
+
+      setError('')
+      setIsUrlValid(true)
+      setScanResult(payload)
+    } catch {
+      setError('Unable to complete scan right now. Please try again.')
+      setIsUrlValid(false)
+    } finally {
+      setIsScanning(false)
+    }
+  }
 
   const handleSubmit = async (event) => {
     event.preventDefault()
-    setIsSubmitted(true)
     setIsValidating(true)
     setIsUrlValid(false)
+    setError('')
 
     const validationError = await validateUrl(urls)
 
-    setIsValidating(false)
-
     if (validationError) {
+      setIsValidating(false)
       setError(validationError)
       setIsUrlValid(false)
       return
     }
 
-    setError('')
-    setIsUrlValid(true)
-    console.log('URL is valid:', urls)
+    await runScan(urls.trim())
+    setIsValidating(false)
   }
 
   const handleUrlChange = async (event) => {
     const nextUrl = event.target.value
     setUrls(nextUrl)
+    setScanResult(null)
 
     if (!nextUrl.trim()) {
-      setIsSubmitted(false)
       setIsValidating(false)
       setError('')
       setIsUrlValid(false)
       return
     }
 
-    setIsSubmitted(true)
     setIsValidating(true)
     setError('')
 
@@ -84,14 +113,12 @@ const Scan = () => {
                     const trimmedUrl = urls.trim()
 
                     if (!trimmedUrl) {
-                      setIsSubmitted(false)
                       setIsValidating(false)
                       setError('')
                       setIsUrlValid(false)
                       return
                     }
 
-                    setIsSubmitted(true)
                     setIsValidating(true)
                     setIsUrlValid(false)
                     const validationError = await validateUrl(urls)
@@ -108,9 +135,9 @@ const Scan = () => {
               <button
                 type="submit"
                 className="button button--primary scan-page__url-submit"
-                disabled={isValidating}
+                disabled={isLoading}
               >
-                {isValidating ? 'Validating...' : 'Start scan'}
+                {isValidating ? 'Validating...' : isScanning ? 'Scanning...' : 'Start scan'}
               </button>
             </div>
           </form>
@@ -121,9 +148,13 @@ const Scan = () => {
           ) : null}
           <div className="scan-page__progress-wrap" aria-label="Scan progress">
             <div className="scan-page__progress-bar">
-              <span className="scan-page__progress-fill scan-page__progress-fill--idle" />
+              <span
+                className={`scan-page__progress-fill ${isLoading ? 'scan-page__progress-fill--running' : 'scan-page__progress-fill--idle'}`}
+              />
             </div>
-            <p className="scan-page__progress-text">0%</p>
+            <p className="scan-page__progress-text">
+              {isScanning ? 'Scanning...' : isUrlValid ? 'Ready' : 'Idle'}
+            </p>
           </div>
           <p
             className={
@@ -131,9 +162,15 @@ const Scan = () => {
             }
           >
             <span className="scan-page__status-indicator" aria-hidden="true">
-              {isUrlValid ? '✓' : '⏳'}
+              {isUrlValid && !isLoading ? '✓' : '⏳'}
             </span>
-            {isUrlValid ? 'Valid URL' : 'Scanning URL...'}
+            {isScanning
+              ? 'Running one-page SEO scan...'
+              : isValidating
+                ? 'Validating URL...'
+                : isUrlValid
+                  ? 'Scan complete'
+                  : 'Waiting for URL'}
           </p>
         </div>
 
@@ -141,39 +178,124 @@ const Scan = () => {
           <section className="scan-card scan-card--progress">
             <p className="scan-card__title">Scan Progress</p>
             <ul className="scan-step-list">
-              {steps.map((step) => (
+              {scanChecks.map((step) => (
                 <li
-                  key={step.label}
-                  className={
-                    step.active
-                      ? 'scan-step scan-step--active'
-                      : step.done
-                        ? 'scan-step scan-step--done'
-                        : 'scan-step'
-                  }
+                  key={step}
+                  className={isScanning ? 'scan-step scan-step--active' : 'scan-step'}
                 >
                   <span className="scan-step__icon" aria-hidden="true">
-                    {step.done ? '✓' : step.active ? '●' : '○'}
+                    {isScanning ? '●' : '○'}
                   </span>
-                  <span>{step.label}</span>
+                  <span>{step}</span>
                 </li>
               ))}
             </ul>
           </section>
 
           <section className="scan-card scan-card--preview">
-            <p className="scan-card__title">Currently Analyzing</p>
-            <div className="scan-preview">
-              <div className="scan-preview__screen">
-                <div className="scan-preview__screen-inner">
-                  <p>Website Preview</p>
-                  <span>/ Screenshot</span>
-                </div>
-              </div>
-            </div>
+            <p className="scan-card__title">Analysis Report</p>
             <div className="scan-form scan-form--compact">
               <div className="scan-form__actions">
-                <p className="scan-form__hint">Paste the website URL you want to audit and connect it to the scan workflow.</p>
+                {!scanResult ? (
+                  <p className="scan-form__hint">Paste the website URL you want to audit and run a one-page SEO scan.</p>
+                ) : (
+                  <div className="scan-report">
+                    <div className="scan-report__header">
+                      <div className="scan-report__score-box">
+                        <div className="scan-report__score-title">SEO Health Score</div>
+                        <div className="scan-report__score-row">
+                          <span className="scan-report__score-value">{scanResult.score?.value ?? 0}<small>/100</small></span>
+                          <span className="scan-report__score-grade">Grade: <strong>{scanResult.score?.grade || 'N/A'}</strong></span>
+                        </div>
+                      </div>
+                      <div className="scan-report__page-meta">
+                        <p className="scan-report__meta-line" title={scanResult.scan?.finalUrl || scanResult.scan?.url}>
+                          <strong>Page:</strong> {scanResult.scan?.finalUrl || scanResult.scan?.url}
+                        </p>
+                        <p className="scan-report__meta-line">
+                          <strong>Title:</strong> {scanResult.metadata?.title || 'No title found'}
+                        </p>
+                      </div>
+                    </div>
+
+                    {scanResult.jsRendering?.mayRequireJs || scanResult.jsRendering?.notice ? (
+                      <div className="scan-report__notice scan-report__notice--js">
+                        <span className="scan-report__notice-icon">⚠️</span>
+                        <div>
+                          <strong>Potential issue:</strong> {scanResult.jsRendering?.notice || 'This page may require JavaScript rendering for a complete SEO analysis.'}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    <div className="scan-report__grid">
+                      <div className="scan-report__group">
+                        <h4 className="scan-report__group-title">Core SEO</h4>
+                        <div className="scan-report__stat-row">
+                          <span className="stat-pill stat-pill--passed">Passed: {scanResult.coreSeo?.passed ?? scanResult.summary?.passed ?? 0}</span>
+                          <span className="stat-pill stat-pill--warning">Warnings: {scanResult.coreSeo?.warnings ?? scanResult.summary?.warnings ?? 0}</span>
+                          <span className="stat-pill stat-pill--critical">Critical: {scanResult.coreSeo?.critical ?? scanResult.summary?.critical ?? 0}</span>
+                        </div>
+                      </div>
+
+                      <div className="scan-report__group">
+                        <h4 className="scan-report__group-title">Social Sharing</h4>
+                        <div className="scan-report__status-list">
+                          <div className="scan-report__status-item">
+                            <span>Open Graph:</span>
+                            <span className={`status-badge status-badge--${(scanResult.socialSharing?.openGraph || 'Passed').toLowerCase()}`}>
+                              {scanResult.socialSharing?.openGraph || 'Passed'}
+                            </span>
+                          </div>
+                          <div className="scan-report__status-item">
+                            <span>Twitter Card:</span>
+                            <span className={`status-badge status-badge--${(scanResult.socialSharing?.twitterCard || 'Passed').toLowerCase()}`}>
+                              {scanResult.socialSharing?.twitterCard || 'Passed'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="scan-report__group">
+                        <h4 className="scan-report__group-title">Structured Data</h4>
+                        <div className="scan-report__status-list">
+                          <div className="scan-report__status-item">
+                            <span>JSON-LD:</span>
+                            <span className="status-badge status-badge--info">
+                              {scanResult.structuredData?.exists 
+                                ? `Detected (${scanResult.structuredData.count})` 
+                                : 'Not detected (Info)'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="scan-issues">
+                      <p className="scan-issues__header"><strong>Audit Findings ({scanResult.issues?.length || 0}):</strong></p>
+                      <ul className="scan-issues__list">
+                        {(scanResult.issues || []).map((issue) => (
+                          <li key={issue.id} className={`scan-issues__item scan-issues__item--${issue.severity}`}>
+                            <div className="scan-issues__item-top">
+                              <span className="scan-issues__severity">
+                                {issue.severity.toUpperCase()}
+                              </span>
+                              <span className="scan-issues__category">
+                                {issue.category}
+                              </span>
+                              <strong className="scan-issues__title">{issue.title}</strong>
+                            </div>
+                            <p className="scan-issues__message">{issue.message}</p>
+                            {issue.recommendation && (
+                              <p className="scan-issues__recommendation">
+                                💡 <em>{issue.recommendation}</em>
+                              </p>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </section>

@@ -1,12 +1,14 @@
 const express = require('express');
 const cors = require('cors');
 const { validateSeoUrl } = require('./validator/urlvalidator');
+const scanRoutes = require('./routes/scanRoute');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
+app.use('/api', scanRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ ok: true, message: 'SEOXray backend is running.' });
@@ -37,6 +39,10 @@ app.post('/api/validate-url', async (req, res) => {
   });
 });
 
-app.listen(PORT, () => {
-  console.log(`SEOXray backend listening on http://localhost:${PORT}`);
-});
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`SEOXray backend listening on http://localhost:${PORT}`);
+  });
+}
+
+module.exports = app;
