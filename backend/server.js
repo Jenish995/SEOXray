@@ -6,6 +6,7 @@ const { validateSeoUrl } = require('./validator/urlvalidator');
 const scanRoutes = require('./routes/scanRoute');
 const googleSearchConsoleRoutes = require('./routes/googleSearchConsoleRoutes');
 
+
 const app = express();
 const PORT = process.env.PORT || 5000;
 

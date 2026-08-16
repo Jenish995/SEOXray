@@ -1,7 +1,6 @@
 # 🔍 SEOXray
 
-**SEOXray** is a Puppeteer-powered web crawler and SEO auditing tool that inspects website health, audits technical & on-page SEO issues, and integrates with Google Search Console.
-
+**SEOXray** is a Puppeteer-powered web crawler and SEO auditing tool that inspects website health, audits technical & on-page SEO issues
 ---
 
 ## ✨ Features
@@ -31,19 +30,7 @@ cd backend && npm install
 
 # Frontend
 cd ../frontend && npm install
-```
 
-### 2. Environment Setup
-
-Copy `backend/.env.example` to `backend/.env` and set your credentials:
-
-```env
-PORT=5000
-GOOGLE_CLIENT_ID=your_google_client_id
-GOOGLE_CLIENT_SECRET=your_google_client_secret
-GOOGLE_REDIRECT_URI=http://localhost:5000/auth/google/callback
-SESSION_SECRET=seoxray_gsc_session_secret
-```
 
 ### 3. Run Development Servers
 
