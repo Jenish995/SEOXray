@@ -1,14 +1,31 @@
+require('dotenv').config();
 const express = require('express');
+const session = require('express-session');
 const cors = require('cors');
 const { validateSeoUrl } = require('./validator/urlvalidator');
 const scanRoutes = require('./routes/scanRoute');
+const googleSearchConsoleRoutes = require('./routes/googleSearchConsoleRoutes');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
+app.use(
+  session({
+    secret: process.env.SESSION_SECRET || 'seoxray_gsc_session_secret',
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      secure: false,
+      httpOnly: true,
+      maxAge: 24 * 60 * 60 * 1000,
+    },
+  })
+);
+
 app.use('/api', scanRoutes);
+app.use('/auth', googleSearchConsoleRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ ok: true, message: 'SEOXray backend is running.' });

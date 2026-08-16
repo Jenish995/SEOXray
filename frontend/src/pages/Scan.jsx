@@ -153,24 +153,26 @@ const Scan = () => {
               />
             </div>
             <p className="scan-page__progress-text">
-              {isScanning ? 'Scanning...' : isUrlValid ? 'Ready' : 'Idle'}
+              {isScanning ? 'Scanning...' : scanResult ? 'Complete' : isUrlValid ? 'Ready' : 'Idle'}
             </p>
           </div>
           <p
             className={
-              `scan-page__status ${isUrlValid ? 'scan-page__status--success' : ''} ${isLoading ? 'scan-page__status--loading' : ''}`
+              `scan-page__status ${scanResult ? 'scan-page__status--success' : ''} ${isLoading ? 'scan-page__status--loading' : ''}`
             }
           >
             <span className="scan-page__status-indicator" aria-hidden="true">
-              {isUrlValid && !isLoading ? '✓' : '⏳'}
+              {scanResult && !isLoading ? '✓' : '⏳'}
             </span>
             {isScanning
               ? 'Running one-page SEO scan...'
               : isValidating
                 ? 'Validating URL...'
-                : isUrlValid
+                : scanResult
                   ? 'Scan complete'
-                  : 'Waiting for URL'}
+                  : isUrlValid
+                    ? 'Ready for scan'
+                    : 'Waiting for URL'}
           </p>
         </div>
 
@@ -181,10 +183,10 @@ const Scan = () => {
               {scanChecks.map((step) => (
                 <li
                   key={step}
-                  className={isScanning ? 'scan-step scan-step--active' : 'scan-step'}
+                  className={isScanning ? 'scan-step scan-step--active' : scanResult ? 'scan-step scan-step--done' : 'scan-step'}
                 >
                   <span className="scan-step__icon" aria-hidden="true">
-                    {isScanning ? '●' : '○'}
+                    {isScanning ? '●' : scanResult ? '✓' : '○'}
                   </span>
                   <span>{step}</span>
                 </li>
